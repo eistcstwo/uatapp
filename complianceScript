@@ -1,0 +1,226 @@
+#!/bin/bash
+. /opt/IBM/ace/server/bin/mqsiprofile
+IP=`hostname -i`
+echo $IP
+
+IFS='.' read -ra arr <<< "$IP"
+
+
+
+unset IFS
+ip=`hostname -i`
+echo "${arr[1]}"
+
+if [ "${arr[1]}" == "188" -a "${arr[2]}" == "25" ]
+then
+        echo "PR LINUX"
+        env="PR LINUX"
+
+elif [ "${arr[1]}" == "188" -a "${arr[2]}" == "24" ]
+then
+        echo "PR LINUX"
+        env="PR LINUX"
+
+
+
+elif [ "${arr[1]}" == "177" -a "${arr[2]}" == "40" ]
+then
+        echo "DR LINUX"
+        env="DR LINUX"
+
+
+elif [ "${arr[1]}" == "177" -a "${arr[2]}" == "41" ]
+then
+        echo "DR LINUX"
+        env="DR LINUX"
+
+
+elif [ "${arr[1]}" == "191" -a "${arr[2]}" == "170" ]
+then
+        echo "PR ORACLE"
+        env="PR ORACLE"
+
+elif [ "${arr[1]}" == "176" -a "${arr[2]}" == "0" ]
+then
+        echo "DR ORACLE"
+        env="DR ORACLE"
+
+
+fi
+
+stts=`systemctl status ds_agent | grep Active | awk '{print $2}'`
+
+if [ $? -eq 0 ]
+then
+        if [ $stts == "active" ]
+        then
+                echo "DS agent is running"
+                Dshtts='DSrunning'
+
+        elif [ $stts == "inactive" ]
+        then
+                echo "DS agent is not running"
+                Dshtts='DSnotrunning'
+        else
+                Dshtts='DS_someissue'
+
+
+        fi
+else
+        Dshtts='undefined'
+fi
+
+
+###########Comvault####################
+comvaults=`systemctl status commvault.Instance001 | grep Active | awk '{print $2}'`
+
+if [ $? -eq 0 ]
+then
+        if [ $comvaults == "active" ]
+        then
+                echo "comvault agent is running"
+                comvaults='Comvaultrunning'
+
+        elif [ $comvaults == "inactive" ]
+        then
+                echo "comvault agent is not running"
+                comvaults='Comvaultnotrunning'
+        else
+                comvaults='Comvault__someissue'
+
+
+        fi
+else
+        comvaults='undefined'
+fi
+
+
+
+
+
+
+splunk_stts=`sudo  /opt/splunkforwarder/bin/splunk status | awk 'NR==3{print $3}'`
+
+if [ $? -eq 0 ]
+then
+        if [ $splunk_stts == "running" ]
+        then
+                splunk="SPLrunning"
+        elif [ $splunk_stts == "not" ]
+        then
+                splunk="SPLnotrunning"
+        else
+                splunk="SPL_someissue"
+
+        fi
+else
+        splunk="undefined"
+fi
+
+
+
+
+
+
+ragent_status=`echo "q" | sh /opt/imperva/ragent/bin/racli | grep -i "Remote Agent Status:"`
+#clear
+
+if [ $? -eq 0 ]
+then
+
+        status=`echo $ragent_status | awk '{print $4}'`
+        if [ $status == "stopped" ]
+        then
+                echo "RAgent is stopped"
+                ragent="Ragentnotrunning"
+
+
+        elif [ $status == "running" ]
+        then
+                #echo "RAgent is running"
+                ragent="Ragentrunning"
+
+        fi
+else
+        ragent="undefined"
+fi
+#clear
+
+
+mq_version=`/opt/mqm/bin/dspmqver | tr -s ' ' | grep -i 'Version:' | cut -d ':' -f2`
+os_version=`cat /etc/redhat-release | awk '{print $6 $7}'`
+ace_version=`mqsiservice -v | grep -i "BIP8996I: Version:" | awk {'print$3'}`
+kernel_version=`uname -r`
+rpm_count=`rpm -qa | wc -l`
+firewall_status=`systemctl status firewalld | grep -i Active | awk '{print $2}'`
+cpu_core=`lscpu | grep -i 'Core(s) per socket:' | awk -F ':' '{print $2}'`
+kernel_update=`uname -a | awk '{print $7,$8,$11,$9}'`
+get_ram=`free -g | awk 'NR==2{print $2}'`
+up=`uptime -p |cut -f 2- -d ' ' | sed 's/,//g'`
+memory=(4 8 16 32 64 128 256 512)
+ram_size=4
+echo $get_ram
+reference_id=`chronyc tracking | grep -w "Reference ID" | cut -d":" -f2 | cut -d"(" -f2 | cut -d")" -f1`
+system_time=`chronyc tracking | grep -w "System time" | cut -d":" -f2`
+
+
+
+#password expiry check
+
+eisuserPasswdexp=`chage -l eisuser | grep "Password expires" | cut -d ":" -f2 | sed 's/,//'`
+rootPasswdexp=`chage -l root| grep "Password expires" | cut -d ":" -f2 | sed 's/,//'`
+SOCVAPasswdexp=`chage -l SOCVA | grep "Password expires" | cut -d ":" -f2 | sed 's/,//'`
+addmitamPasswdexp=`chage -l addmitam | grep "Password expires" | cut -d ":" -f2 | sed 's/,//' `
+mountpoint=`df -h |awk 'NR>1 && substr($5, 1, length($5)-1) + 0 > 69 {printf "%s (%s) ",$6,$5; above_69=1} END {if (!above_69) print "OK"}'`
+
+for index in "${!memory[@]}"
+do
+        if [ ${memory[$index]} -gt "$get_ram" -a  ${memory[$index]} -ne $ram_size ]
+        then
+                upper_bound=${memory[$index]}
+                lower_bound=${memory[$index-1]}
+
+                diff1=`expr $get_ram - $lower_bound`
+                diff2=`expr $upper_bound - $get_ram`
+
+                if [ $diff1 -lt $diff2 ]
+                then
+                        ram_size=$lower_bound
+                        #echo "if ${ram_size}"
+                else
+                        ram_size=$upper_bound
+
+                        #echo "else ${ram_size}"
+                fi
+                break
+
+        fi
+        #echo ${memory[$index]}
+done
+
+echo $ram_size
+echo "`hostname -i`,${mountpoint},$(date +"%F %r"),${up},${env},${ram_size},${cpu_core},${os_version},${kernel_version},${kernel_update},${ace_version},${mq_version},${firewall_status},${rpm_count},${Dshtts},${splunk},${ragent},${reference_id},${system_time},${eisuserPasswdexp},${rootPasswdexp},${SOCVAPasswdexp},${addmitamPasswdexp},${comvaults}">/home/scripts/service_tracker/service_${ip}.txt
+chmod 777 /home/scripts/service_tracker/service_${ip}.txt
+if [ $? -eq 0 ]
+then
+        echo "[+]Permission changed for service_${ip}.txt"
+else
+        echo "Issue occured while deleting file"
+fi
+
+chown eisuser:eisuser /home/scripts/service_tracker/service_${ip}.txt
+if [ $? -eq 0 ]
+then
+        echo "[+]Owner changed for service_${ip}.txt"
+else
+        echo "Issue occured while changing ownership"
+fi
+
+
+
+
+#su - eisuser -c "scp  /home/scripts/service_tracker/service_${ip}.txt 10.191.171.8:/opt/apache-tomcat/webapps/Compliance/data"
+#echo "put /home/scripts/service_tracker/service_10.188.25.110.txt /opt/apache-tomcat/webapps/Compliance/data" | sftp -q eisuser@10.188.24.100
+
+
+su - eisuser -c "echo \"put /home/scripts/service_tracker/service_${ip}.txt /opt/apache-tomcat/webapps/Compliance/data\" | sftp -q 10.188.24.100"
